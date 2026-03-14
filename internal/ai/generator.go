@@ -37,23 +37,21 @@ func GenerateAdImage(userContext, adSummary string, brand BrandInfo) (string, er
 	}
 
 	// Формуємо фінальний промпт, поєднуючи побажання юзера і вижимку
-	colorPalette := "палітра ще не задана"
+	colorPalette := "palette not provided yet"
 	if len(brand.Colors) > 0 {
 		colorPalette = strings.Join(brand.Colors, ", ")
 	}
 
 	creativeHint := brand.CreativePrompt
 	if creativeHint == "" {
-		creativeHint = "Підкресли цінність продукту, встанови емоційний тон і запропонуй сильний заклик до дії."
+		creativeHint = "Emphasize product value, establish an emotional tone, and offer a strong call to action."
 	}
 
-	logoNote := fmt.Sprintf("Лого надано як SVG/PNG-дані (довжина %d символів).", len(brand.LogoImage))
-
 	finalPrompt := fmt.Sprintf(
-		"Create a dramatic, differentiated advertisement image. User request: %s. Brand description: %s. %s Colors: %s. Creative prompt: %s. Competitor insights: %s. Include the provided logo as the primary lockup and honour the brand palette, but add your own elevated visual storytelling. High quality, professional, photorealistic.",
+		"Create a dramatic, differentiated advertisement image. User request: %s. Brand description: %s. Logo provided as SVG/PNG data (length %d characters). Colors: %s. Creative prompt: %s. Competitor insights: %s. Include the provided logo as the primary lockup and honor the brand palette, while adding an elevated visual story. High quality, professional, photorealistic.",
 		userContext,
 		brand.Description,
-		logoNote,
+		len(brand.LogoImage),
 		colorPalette,
 		creativeHint,
 		adSummary,
@@ -65,8 +63,8 @@ func GenerateAdImage(userContext, adSummary string, brand BrandInfo) (string, er
 	reqBody, _ := json.Marshal(map[string]string{
 		"prompt": finalPrompt,
 	})
-	slog.Info("Ось final prompt", "prompt", finalPrompt)
-	url := "https://queue.fal.run/fal-ai/nano-banana-2"
+
+	url := "https://fal.run/fal-ai/nano-banana-2"
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(reqBody))
 	if err != nil {
 		return "", fmt.Errorf("помилка створення запиту до fal.ai: %w", err)
@@ -81,7 +79,6 @@ func GenerateAdImage(userContext, adSummary string, brand BrandInfo) (string, er
 		return "", fmt.Errorf("помилка виконання запиту до fal.ai: %w", err)
 	}
 	defer resp.Body.Close()
-
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		return "", fmt.Errorf("помилка fal.ai: статус %d, тіло: %s", resp.StatusCode, string(body))

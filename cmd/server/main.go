@@ -39,31 +39,46 @@ func main() {
 		slog.Info("Завантажено змінні середовища з .env файлу.")
 	}
 
-	// Налаштування Gin
-	gin.SetMode(gin.ReleaseMode)
-	r := gin.Default()
+	r := setupRouter(store.NewMemoryStore())
 
-	memStore := store.NewMemoryStore()
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	slog.Info("Сервер запущено", "port", port)
+	if err := r.Run(fmt.Sprintf(":%s", port)); err != nil {
+		slog.Error("Помилка запуску сервера", "помилка", err.Error())
+	}
+}
+
+func setupRouter(memStore *store.MemoryStore) *gin.Engine {
+	r := gin.Default()
 
 	// CORS мідлвар
 	r.Use(func(c *gin.Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
 		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(204)
+		if c.Request.Method == http.MethodOptions {
+			c.AbortWithStatus(http.StatusNoContent)
 			return
 		}
 		c.Next()
 	})
 
-	// Хелсчек
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
-	// Ендпоінт генерації
-	r.POST("/api/generate", func(c *gin.Context) {
+	r.POST("/api/generate", generateAdHandler(memStore))
+	r.GET("/api/store/:page_id", storeLookupHandler(memStore))
+
+	return r
+}
+
+func generateAdHandler(memStore *store.MemoryStore) gin.HandlerFunc {
+	return func(c *gin.Context) {
 		var req GenerateRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
 			slog.Error("Невалідний запит від клієнта", "помилка", err.Error())
@@ -73,7 +88,6 @@ func main() {
 
 		slog.Info("Отримано запит на генерацію", "page_id", req.PageID, "user_context", req.UserContext, "brand_description_len", len(req.BrandInfo.Description), "brand_colors", req.BrandInfo.Colors)
 
-		// 1. Скрапимо (мокаємо) найкращі реклами
 		creatives, err := scraper.ScrapeTopAds(req.PageID)
 		if err != nil {
 			slog.Error("Помилка скрапінгу", "помилка", err.Error())
@@ -81,7 +95,6 @@ func main() {
 			return
 		}
 
-		// 2. Робимо вижимку (мокаємо)
 		summary, err := ai.SummarizeAds(creatives)
 		if err != nil {
 			slog.Error("Помилка при створенні вижимки", "помилка", err.Error())
@@ -89,7 +102,6 @@ func main() {
 			return
 		}
 
-		// 3. Генеруємо нову рекламу через fal.ai
 		imageURL, err := ai.GenerateAdImage(req.UserContext, summary, req.BrandInfo)
 		if err != nil {
 			slog.Error("Помилка генерації", "помилка", err.Error())
@@ -111,24 +123,16 @@ func main() {
 			ImageURL: imageURL,
 			Summary:  summary,
 		})
-	})
+	}
+}
 
-	r.GET("/api/store/:page_id", func(c *gin.Context) {
+func storeLookupHandler(memStore *store.MemoryStore) gin.HandlerFunc {
+	return func(c *gin.Context) {
 		pageID := c.Param("page_id")
 		if stored, ok := memStore.Get(pageID); ok {
 			c.JSON(http.StatusOK, stored)
 			return
 		}
 		c.JSON(http.StatusNotFound, gin.H{"error": "Дані для цієї сторінки не знайдено"})
-	})
-
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
-
-	slog.Info("Сервер запущено", "port", port)
-	if err := r.Run(fmt.Sprintf(":%s", port)); err != nil {
-		slog.Error("Помилка запуску сервера", "помилка", err.Error())
 	}
 }
