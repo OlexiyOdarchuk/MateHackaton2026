@@ -1,14 +1,14 @@
 <script lang="ts">
-  import { 
-    Building2, Palette, MessageSquarePlus, Layout, 
+  import {
+    Building2, Palette, MessageSquarePlus, Layout,
     Plus, Trash2, Languages, Upload, FileType,
     Zap, X, CheckCircle2, Link as LinkIcon, ChevronDown,
-    ArrowRight, ChevronLeft, Sparkles, Globe
+    ArrowRight, ChevronLeft, Sparkles, Globe, Loader2, Download
   } from 'lucide-svelte';
   import { onMount } from 'svelte';
 
   // --- SVELTE 5 STATE (RUNES) ---
-  let currentPage = $state('home'); // 'home' | 'builder'
+  let currentPage = $state('home'); // 'home' | 'builder' | 'result'
   let lang = $state('UA'); // 'UA' | 'EN'
   
   let companyName = $state('');
@@ -26,6 +26,10 @@
   let isDragging = $state(false);
   let uploadedFiles = $state<File[]>([]);
   let fileError = $state('');
+
+  let isGenerating = $state(false);
+  let generateError = $state('');
+  let generatedAd = $state<{image_url: string, summary: string} | null>(null);
 
   const europeanLanguages = [
     'English', 'Ukrainian', 'German', 'French', 'Italian', 'Spanish', 'Polish', 
@@ -79,7 +83,8 @@
         myBusinessLabel: 'Посилання на Meta Ad Library вашого бізнесу'
       },
       industries: ['ecommerce', 'restaurant / cafe', 'beauty', 'education', 'local services', 'other'],
-      cta: 'Згенерувати рекламу'
+      cta: 'Згенерувати рекламу',
+      generating: 'Генерація...'
     },
     EN: {
       title: 'TrendAd Builder',
@@ -118,7 +123,8 @@
         myBusinessLabel: 'Your Business Meta Ad Library Link'
       },
       industries: ['ecommerce', 'restaurant / cafe', 'beauty', 'education', 'local services', 'other'],
-      cta: 'Generate Ad'
+      cta: 'Generate Ad',
+      generating: 'Generating...'
     }
   };
 
@@ -131,9 +137,9 @@
   }
 
   function validateFile(file: File) {
-    const validTypes = ['image/png', 'image/svg+xml'];
+    const validTypes = ['image/png', 'image/svg+xml', 'image/jpeg', 'image/webp'];
     if (!validTypes.includes(file.type)) {
-      fileError = lang === 'UA' ? 'Тільки PNG або SVG!' : 'Only PNG or SVG allowed!';
+      fileError = lang === 'UA' ? 'Тільки PNG, JPEG, WEBP або SVG!' : 'Only PNG, JPEG, WEBP or SVG allowed!';
       return false;
     }
     fileError = '';
@@ -188,9 +194,86 @@
   function addCompetitor() { if (competitorLinks.length < 10) competitorLinks = [...competitorLinks, '']; }
   function removeCompetitor(index: number) { competitorLinks = competitorLinks.filter((_, i) => i !== index); }
   
-  function handleGenerate() {
-    console.log('Generating...', { companyName, industry, businessDescription, brandColors, adPrompt, selectedAdLanguage, uploadedFile, competitorLinks, myBusinessAdLibraryLink });
-    alert('Generating your premium ad content...');
+  async function fileToBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = error => reject(error);
+    });
+  }
+
+  function extractPageId(url: string): string {
+    try {
+      const urlObj = new URL(url);
+      const pageId = urlObj.searchParams.get('view_all_page_id');
+      if (pageId) return pageId;
+      const match = url.match(/view_all_page_id=(\d+)/);
+      return match ? match[1] : '';
+    } catch {
+      const match = url.match(/view_all_page_id=(\d+)/);
+      return match ? match[1] : '';
+    }
+  }
+
+  async function handleGenerate() {
+    if (isGenerating) return;
+    
+    isGenerating = true;
+    generateError = '';
+    
+    try {
+      let logoBase64 = '';
+      if (uploadedFiles.length > 0) {
+        logoBase64 = await fileToBase64(uploadedFiles[0]);
+      }
+
+      let pageId = '';
+      for (const link of competitorLinks) {
+        pageId = extractPageId(link);
+        if (pageId) break;
+      }
+      
+      if (!pageId && myBusinessAdLibraryLink) {
+         pageId = extractPageId(myBusinessAdLibraryLink);
+      }
+
+      if (!pageId) {
+         pageId = "default_page_id";
+      }
+
+      const payload = {
+        user_context: `Company: ${companyName}, Industry: ${industry}, Language: ${selectedAdLanguage}`,
+        page_id: pageId,
+        brand_info: {
+          logo_image: logoBase64,
+          company_description: businessDescription,
+          company_colors: brandColors,
+          creative_prompt: adPrompt
+        }
+      };
+
+      const res = await fetch('/api/generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `Server error: ${res.status}`);
+      }
+
+      generatedAd = await res.json();
+      currentPage = 'result';
+    } catch (e: any) {
+      console.error('Generation failed:', e);
+      generateError = e.message || 'Unknown error occurred.';
+    } finally {
+      isGenerating = false;
+    }
   }
 
   onMount(() => {
@@ -244,7 +327,7 @@
       </div>
     </div>
 
-  {:else}
+  {:else if currentPage === 'builder'}
     <!-- BUILDER PAGE -->
     <div class="max-w-4xl mx-auto py-12 px-4 space-y-8 animate-in fade-in duration-500">
       
@@ -278,7 +361,7 @@
           <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div class="space-y-2">
               <label class="text-sm font-medium text-zinc-400 ml-1">{cur.fields.companyName}</label>
-              <input type="text" bind:value={companyName} placeholder={cur.fields.companyPlaceholder} class="w-full bg-zinc-800/40 border border-white/10 rounded-xl px-4 py-3.5 focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all placeholder:text-zinc-500 text-white" />
+              <input type="text" bind:value={companyName} placeholder="{cur.fields.companyPlaceholder}" class="w-full bg-zinc-800/40 border border-white/10 rounded-xl px-4 py-3.5 focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all placeholder:text-zinc-500 text-white" />
             </div>
 
             <div class="space-y-2">
@@ -305,7 +388,7 @@
 
             <div class="md:col-span-2 space-y-2">
               <label class="text-sm font-medium text-zinc-400 ml-1">{cur.fields.description}</label>
-              <textarea bind:value={businessDescription} placeholder={cur.fields.descriptionPlaceholder} rows="3" class="w-full bg-zinc-800/40 border border-white/10 rounded-xl px-4 py-3.5 focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all placeholder:text-zinc-500 text-white resize-none"></textarea>
+              <textarea bind:value={businessDescription} placeholder="{cur.fields.descriptionPlaceholder}" rows="3" class="w-full bg-zinc-800/40 border border-white/10 rounded-xl px-4 py-3.5 focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all placeholder:text-zinc-500 text-white resize-none"></textarea>
             </div>
           </div>
         </section>
@@ -322,7 +405,7 @@
             <div class="space-y-3">
               <label class="text-sm font-medium text-zinc-400 ml-1">{cur.fields.upload}</label>
               <div role="button" tabindex="0" ondragover={(e) => { e.preventDefault(); isDragging = true; }} ondragleave={() => isDragging = false} ondrop={handleDrop} onclick={() => document.getElementById('file-input')?.click()} class="w-full border-2 border-dashed rounded-2xl bg-zinc-800/20 py-10 flex flex-col items-center justify-center gap-3 transition-all cursor-pointer {isDragging ? 'border-indigo-500 bg-indigo-500/5' : 'border-zinc-800 hover:border-zinc-700'}">
-                <input id="file-input" type="file" accept=".png,.svg" multiple hidden onchange={handleFileSelect} />
+                <input id="file-input" type="file" accept=".png,.svg,.jpg,.jpeg,.webp" multiple hidden onchange={handleFileSelect} />
                 <div class="p-4 rounded-full bg-zinc-800/60 transition-colors"><Upload class={isDragging ? 'text-indigo-400' : 'text-zinc-500'} size={28} /></div>
                 <div class="text-center px-6"><p class="text-zinc-400 text-sm font-medium">{cur.fields.uploadHelper}</p><p class="text-zinc-600 text-xs mt-1">{cur.fields.uploadFormats}</p></div>
                 {#if fileError}<p class="text-red-400 text-xs mt-2 font-medium">{fileError}</p>{/if}
@@ -389,7 +472,7 @@
             <div class="space-y-2">
               <label class="text-sm font-medium text-zinc-400 ml-1">{cur.fields.adPrompt}</label>
               <div class="relative">
-                <textarea bind:value={adPrompt} placeholder={cur.fields.adPromptPlaceholder} rows="5" class="w-full bg-zinc-800/40 border border-white/10 rounded-2xl px-5 py-5 focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all placeholder:text-zinc-500 text-white leading-relaxed"></textarea>
+                <textarea bind:value={adPrompt} placeholder="{cur.fields.adPromptPlaceholder}" rows="5" class="w-full bg-zinc-800/40 border border-white/10 rounded-2xl px-5 py-5 focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all placeholder:text-zinc-500 text-white leading-relaxed"></textarea>
                 <div class="mt-3 flex items-start gap-2 text-xs text-zinc-500 ml-1"><MessageSquarePlus size={14} class="mt-0.5 text-zinc-600" /><span>{cur.fields.adPromptHelper}</span></div>
               </div>
             </div>
@@ -460,15 +543,76 @@
           </div>
         </section>
 
+        {#if generateError}
+          <div class="p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-sm font-medium text-center animate-in fade-in">
+            {generateError}
+          </div>
+        {/if}
+
         <!-- FINAL CTA -->
         <div class="pt-10 flex justify-center">
           <button 
             onclick={handleGenerate} 
-            class="px-16 py-5 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-bold rounded-2xl shadow-[0_0_25px_rgba(139,92,246,0.4)] transition-all hover:scale-[1.05] active:scale-[0.95] text-lg tracking-wide"
+            disabled={isGenerating}
+            class="group px-16 py-5 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold rounded-2xl shadow-[0_0_25px_rgba(139,92,246,0.4)] transition-all hover:scale-[1.05] active:scale-[0.95] text-lg tracking-wide flex items-center gap-3"
           >
-            {cur.cta}
+            {#if isGenerating}
+              <Loader2 size={24} class="animate-spin" />
+              <span>{cur.generating}</span>
+            {:else}
+              {cur.cta}
+            {/if}
           </button>
         </div>
+      </div>
+    </div>
+  
+  {:else if currentPage === 'result'}
+    <!-- RESULT PAGE -->
+    <div class="max-w-4xl mx-auto py-12 px-4 space-y-8 animate-in fade-in slide-in-from-bottom-8 duration-500">
+      <header class="flex justify-between items-center mb-12">
+        <button onclick={() => currentPage = 'builder'} class="flex items-center gap-2 px-4 py-2 bg-zinc-900 border border-white/5 rounded-full text-sm font-medium hover:bg-zinc-800 transition-colors">
+          <ChevronLeft size={16} />
+          {lang === 'UA' ? 'Назад до редактора' : 'Back to Builder'}
+        </button>
+        
+        <div class="flex items-center gap-3">
+          <div class="p-1.5 bg-gradient-to-br from-green-500 to-emerald-600 rounded-lg shadow-lg"><CheckCircle2 size={18} class="text-white" /></div>
+          <span class="text-lg font-bold text-white tracking-tight hidden sm:block">Success!</span>
+        </div>
+      </header>
+
+      <div class="bg-zinc-900/40 backdrop-blur-xl border border-white/5 rounded-3xl p-8 space-y-8 relative isolate">
+        <div class="absolute -z-10 top-0 left-1/2 -translate-x-1/2 w-full h-full bg-indigo-600/5 blur-[100px] rounded-full"></div>
+        
+        <h2 class="text-3xl font-bold text-white text-center mb-8">
+          {lang === 'UA' ? 'Ваш згенерований креатив' : 'Your Generated Creative'}
+        </h2>
+
+        {#if generatedAd}
+          <div class="flex flex-col items-center gap-8">
+            <div class="w-full max-w-2xl aspect-square bg-black/50 border border-white/10 rounded-2xl overflow-hidden shadow-2xl relative group">
+              <img src={generatedAd.image_url} alt="Generated Ad" class="w-full h-full object-contain" />
+              
+              <div class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-sm">
+                <a href={generatedAd.image_url} target="_blank" download class="flex items-center gap-2 px-6 py-3 bg-white text-black font-bold rounded-xl hover:scale-105 transition-transform">
+                  <Download size={20} />
+                  Download Creative
+                </a>
+              </div>
+            </div>
+
+            <div class="w-full max-w-3xl bg-zinc-800/40 border border-white/10 rounded-2xl p-6 space-y-4">
+              <div class="flex items-center gap-3 mb-4">
+                <div class="p-2 bg-indigo-500/10 rounded-lg"><Sparkles size={20} class="text-indigo-400" /></div>
+                <h3 class="text-lg font-semibold text-white">{lang === 'UA' ? 'Копірайтинг та інсайти' : 'Copywriting & Insights'}</h3>
+              </div>
+              <div class="prose prose-invert max-w-none">
+                <p class="text-zinc-300 leading-relaxed whitespace-pre-wrap">{generatedAd.summary}</p>
+              </div>
+            </div>
+          </div>
+        {/if}
       </div>
     </div>
   {/if}
@@ -477,7 +621,7 @@
 <style>
   :global(::-webkit-scrollbar) { width: 8px; }
   :global(::-webkit-scrollbar-track) { background: transparent; }
-  :global(::-webkit-scrollbar-thumb) { background: #27272a; border-radius: 10px; }
+  :global(::-webkit-scrollbar-thumb) { background: #272727; border-radius: 10px; }
   :global(::-webkit-scrollbar-thumb:hover) { background: #3f3f46; }
   
   .custom-scroll::-webkit-scrollbar { width: 4px; }

@@ -42,9 +42,6 @@ func main() {
 	r := setupRouter(store.NewMemoryStore())
 
 	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
 
 	slog.Info("Сервер запущено", "port", port)
 	if err := r.Run(fmt.Sprintf(":%s", port)); err != nil {
@@ -71,8 +68,11 @@ func setupRouter(memStore *store.MemoryStore) *gin.Engine {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
-	r.POST("/api/generate", generateAdHandler(memStore))
-	r.GET("/api/store/:page_id", storeLookupHandler(memStore))
+	api := r.Group("/api")
+	api.POST("/generate", generateAdHandler(memStore))
+	api.GET("/store/:page_id", storeLookupHandler(memStore))
+
+	registerEmbeddedFrontendRoutes(r)
 
 	return r
 }
