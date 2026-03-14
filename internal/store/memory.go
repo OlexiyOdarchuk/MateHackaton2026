@@ -12,6 +12,7 @@ type StoredAd struct {
 	PageID      string       `json:"page_id"`
 	UserContext string       `json:"user_context"`
 	BrandInfo   ai.BrandInfo `json:"brand_info"`
+	Competitors []string     `json:"competitors"`
 	Summary     string       `json:"summary"`
 	ImageURL    string       `json:"image_url"`
 	CreatedAt   time.Time    `json:"created_at"`

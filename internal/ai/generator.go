@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 )
 
 // BrandInfo describes the brand identity assets that the frontend sends.
@@ -28,7 +29,7 @@ type FalResponse struct {
 
 // GenerateAdImage викликає fal-ai/nano-banana-2 для генерації нової реклами
 // на основі вводу користувача, бренду та вижимки з найкращих реклам конкурентів.
-func GenerateAdImage(userContext, adSummary string, brand BrandInfo) (string, error) {
+func GenerateAdImage(userContext, adSummary, adLanguage string, brand BrandInfo) (string, error) {
 	falKey := os.Getenv("FAL_KEY")
 	if falKey == "" {
 		mockURL := "https://example.com/mock-ad-image.png"
@@ -56,6 +57,7 @@ func GenerateAdImage(userContext, adSummary string, brand BrandInfo) (string, er
 		creativeHint,
 		adSummary,
 	)
+	finalPrompt = fmt.Sprintf("%s Any typography, slogans, or text overlays in the image MUST be written in %s. Make the text highly legible and integrated into the design.", finalPrompt, adLanguage)
 
 	slog.Info("Генерація фото через fal.ai", "prompt_length", len(finalPrompt))
 
@@ -73,7 +75,7 @@ func GenerateAdImage(userContext, adSummary string, brand BrandInfo) (string, er
 	req.Header.Set("Authorization", "Key "+falKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{}
+	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("помилка виконання запиту до fal.ai: %w", err)
