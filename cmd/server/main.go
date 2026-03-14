@@ -11,12 +11,14 @@ import (
 
 	"SuperAdds/internal/ai"
 	"SuperAdds/internal/scraper"
+	"SuperAdds/internal/store"
 )
 
 // GenerateRequest - те, що приходить від фронтенду
 type GenerateRequest struct {
-	UserContext string `json:"user_context" binding:"required"`
-	PageID      string `json:"page_id" binding:"required"`
+	UserContext string       `json:"user_context" binding:"required"`
+	PageID      string       `json:"page_id" binding:"required"`
+	BrandInfo   ai.BrandInfo `json:"brand_info" binding:"required"`
 }
 
 // GenerateResponse - те, що ми повертаємо на фронтенд
@@ -40,6 +42,8 @@ func main() {
 	// Налаштування Gin
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
+
+	memStore := store.NewMemoryStore()
 
 	// CORS мідлвар
 	r.Use(func(c *gin.Context) {
@@ -67,7 +71,7 @@ func main() {
 			return
 		}
 
-		slog.Info("Отримано запит на генерацію", "page_id", req.PageID, "user_context", req.UserContext)
+		slog.Info("Отримано запит на генерацію", "page_id", req.PageID, "user_context", req.UserContext, "brand_description_len", len(req.BrandInfo.Description), "brand_colors", req.BrandInfo.Colors)
 
 		// 1. Скрапимо (мокаємо) найкращі реклами
 		creatives, err := scraper.ScrapeTopAds(req.PageID)
@@ -86,12 +90,20 @@ func main() {
 		}
 
 		// 3. Генеруємо нову рекламу через fal.ai
-		imageURL, err := ai.GenerateAdImage(req.UserContext, summary)
+		imageURL, err := ai.GenerateAdImage(req.UserContext, summary, req.BrandInfo)
 		if err != nil {
 			slog.Error("Помилка генерації", "помилка", err.Error())
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Помилка генерації зображення"})
 			return
 		}
+
+		memStore.Save(store.StoredAd{
+			PageID:      req.PageID,
+			UserContext: req.UserContext,
+			BrandInfo:   req.BrandInfo,
+			Summary:     summary,
+			ImageURL:    imageURL,
+		})
 
 		slog.Info("Успішно згенеровано рекламу", "image_url", imageURL)
 
@@ -99,6 +111,15 @@ func main() {
 			ImageURL: imageURL,
 			Summary:  summary,
 		})
+	})
+
+	r.GET("/api/store/:page_id", func(c *gin.Context) {
+		pageID := c.Param("page_id")
+		if stored, ok := memStore.Get(pageID); ok {
+			c.JSON(http.StatusOK, stored)
+			return
+		}
+		c.JSON(http.StatusNotFound, gin.H{"error": "Дані для цієї сторінки не знайдено"})
 	})
 
 	port := os.Getenv("PORT")

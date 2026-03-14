@@ -8,7 +8,16 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 )
+
+// BrandInfo describes the brand identity assets that the frontend sends.
+type BrandInfo struct {
+	LogoImage      string   `json:"logo_image" binding:"required"`
+	Description    string   `json:"company_description" binding:"required"`
+	Colors         []string `json:"company_colors"`
+	CreativePrompt string   `json:"creative_prompt"`
+}
 
 // FalResponse - структура для парсингу відповіді від fal.ai
 type FalResponse struct {
@@ -17,24 +26,46 @@ type FalResponse struct {
 	} `json:"images"`
 }
 
-// GenerateAdImage викликає fal-ai/nano-banana-2 для генерації нової реклами 
-// на основі вводу користувача та вижимки з найкращих реклам конкурентів.
-func GenerateAdImage(userContext, adSummary string) (string, error) {
+// GenerateAdImage викликає fal-ai/nano-banana-2 для генерації нової реклами
+// на основі вводу користувача, бренду та вижимки з найкращих реклам конкурентів.
+func GenerateAdImage(userContext, adSummary string, brand BrandInfo) (string, error) {
 	falKey := os.Getenv("FAL_KEY")
 	if falKey == "" {
-		return "", fmt.Errorf("FAL_KEY не знайдено в змінних середовища")
+		mockURL := "https://example.com/mock-ad-image.png"
+		slog.Warn("FAL_KEY не задано, повертаємо мокове зображення для MVP", "mock_url", mockURL)
+		return mockURL, nil
 	}
 
 	// Формуємо фінальний промпт, поєднуючи побажання юзера і вижимку
-	finalPrompt := fmt.Sprintf("Create a highly engaging advertisement image. User request: %s. Use these successful elements from competitors: %s. High quality, professional, photorealistic.", userContext, adSummary)
-	
+	colorPalette := "палітра ще не задана"
+	if len(brand.Colors) > 0 {
+		colorPalette = strings.Join(brand.Colors, ", ")
+	}
+
+	creativeHint := brand.CreativePrompt
+	if creativeHint == "" {
+		creativeHint = "Підкресли цінність продукту, встанови емоційний тон і запропонуй сильний заклик до дії."
+	}
+
+	logoNote := fmt.Sprintf("Лого надано як SVG/PNG-дані (довжина %d символів).", len(brand.LogoImage))
+
+	finalPrompt := fmt.Sprintf(
+		"Create a dramatic, differentiated advertisement image. User request: %s. Brand description: %s. %s Colors: %s. Creative prompt: %s. Competitor insights: %s. Include the provided logo as the primary lockup and honour the brand palette, but add your own elevated visual storytelling. High quality, professional, photorealistic.",
+		userContext,
+		brand.Description,
+		logoNote,
+		colorPalette,
+		creativeHint,
+		adSummary,
+	)
+
 	slog.Info("Генерація фото через fal.ai", "prompt_length", len(finalPrompt))
 
 	// Тіло запиту
 	reqBody, _ := json.Marshal(map[string]string{
 		"prompt": finalPrompt,
 	})
-
+	slog.Info("Ось final prompt", "prompt", finalPrompt)
 	url := "https://queue.fal.run/fal-ai/nano-banana-2"
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(reqBody))
 	if err != nil {
