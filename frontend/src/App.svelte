@@ -124,9 +124,3 @@
     </div>
   </div>
 </main>
-
-<style>
-  :global(body) {
-    @apply bg-zinc-950;
-  }
-</style>
